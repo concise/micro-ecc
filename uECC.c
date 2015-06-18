@@ -2271,6 +2271,74 @@ static void update_V(uECC_HashContext *hash_context, uint8_t *K, uint8_t *V) {
     HMAC_finish(hash_context, K, V);
 }
 
+#define BYTE_LENGTH_OF_N_1 21
+#define BYTE_LENGTH_OF_N_2 24
+#define BYTE_LENGTH_OF_N_3 32
+#define BYTE_LENGTH_OF_N_4 32
+
+#define N_1   { 0x01, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, \
+                0x01, 0xF4, 0xC8, 0xF9, 0x27, 0xAE, 0xD3, 0xCA, 0x75, 0x22, \
+                0x57 }
+#define N_2   { 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, \
+                0xFF, 0xFF, 0x99, 0xDE, 0xF8, 0x36, 0x14, 0x6B, 0xC9, 0xB1, \
+                0xB4, 0xD2, 0x28, 0x31 }
+#define N_3   { 0xFF, 0xFF, 0xFF, 0xFF, 0x00, 0x00, 0x00, 0x00, 0xFF, 0xFF, \
+                0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xBC, 0xE6, 0xFA, 0xAD, \
+                0xA7, 0x17, 0x9E, 0x84, 0xF3, 0xB9, 0xCA, 0xC2, 0xFC, 0x63, \
+                0x25, 0x51 }
+#define N_4   { 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, \
+                0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFE, 0xBA, 0xAE, 0xDC, 0xE6, \
+                0xAF, 0x48, 0xA0, 0x3B, 0xBF, 0xD2, 0x5E, 0x8C, 0xD0, 0x36, \
+                0x41, 0x41 }
+
+#define BYTE_LENGTH_OF_N uECC_CONCAT(BYTE_LENGTH_OF_N_, uECC_CURVE)
+
+static const uint8_t N[BYTE_LENGTH_OF_N] = uECC_CONCAT(N_, uECC_CURVE);
+
+static void rfc6979_bits2octets(
+        const unsigned char in[], unsigned ilen,
+        unsigned char out[BYTE_LENGTH_OF_N])
+{
+    int i;
+    unsigned char borrow;
+    unsigned char diff;
+
+    if (!(in && out)) return;
+
+    // bits2int will truncate or extend the provided bit string when its length
+    // does not match curve order N.
+    if (ilen < BYTE_LENGTH_OF_N) {
+        for (i = 0; i < (int)(BYTE_LENGTH_OF_N - ilen); ++i) {
+            out[i] = 0;
+        }
+        for (i = BYTE_LENGTH_OF_N - ilen; i < BYTE_LENGTH_OF_N; ++i) {
+            out[i] = in[i - (BYTE_LENGTH_OF_N - ilen)];
+        }
+    } else {
+        for (i = 0; i < BYTE_LENGTH_OF_N; ++i) {
+            out[i] = in[i];
+        }
+    }
+
+    // Usually the integer is less than N, we don't need to do anything.
+    for (i = 0; i < BYTE_LENGTH_OF_N; ++i) {
+        if (N[i] > out[i]) {
+            return;
+        }
+    }
+
+    // When the integer is greater than or equal to N, bits2octets reduces the
+    // integer modulo N.  It can be done by one subtraction.
+    borrow = 0;
+    for (i = BYTE_LENGTH_OF_N - 1; i >= 0; --i) {
+        diff = out[i] - N[i] - borrow;
+        if (diff != out[i]) {
+            borrow = (diff > out[i]);
+        }
+        out[i] = diff;
+    }
+}
+
 /* Deterministic signing, similar to RFC 6979. Differences are:
     * We just use (truncated) H(m) directly rather than bits2octets(H(m))
       (it is not reduced modulo curve_n).
@@ -2285,6 +2353,10 @@ int uECC_sign_deterministic(const uint8_t private_key[uECC_BYTES],
     uint8_t *V = K + hash_context->result_size;
     uECC_word_t tries;
     unsigned i;
+    uint8_t message_hash_reduced[BYTE_LENGTH_OF_N];
+
+    rfc6979_bits2octets(message_hash, uECC_BYTES, message_hash_reduced);
+
     for (i = 0; i < hash_context->result_size; ++i) {
         V[i] = 0x01;
         K[i] = 0;
@@ -2295,7 +2367,7 @@ int uECC_sign_deterministic(const uint8_t private_key[uECC_BYTES],
     V[hash_context->result_size] = 0x00;
     HMAC_update(hash_context, V, hash_context->result_size + 1);
     HMAC_update(hash_context, private_key, uECC_BYTES);
-    HMAC_update(hash_context, message_hash, uECC_BYTES);
+    HMAC_update(hash_context, message_hash_reduced, BYTE_LENGTH_OF_N);
     HMAC_finish(hash_context, K, K);
     
     update_V(hash_context, K, V);
@@ -2305,13 +2377,13 @@ int uECC_sign_deterministic(const uint8_t private_key[uECC_BYTES],
     V[hash_context->result_size] = 0x01;
     HMAC_update(hash_context, V, hash_context->result_size + 1);
     HMAC_update(hash_context, private_key, uECC_BYTES);
-    HMAC_update(hash_context, message_hash, uECC_BYTES);
+    HMAC_update(hash_context, message_hash_reduced, BYTE_LENGTH_OF_N);
     HMAC_finish(hash_context, K, K);
     
     update_V(hash_context, K, V);
 
     for (tries = 0; tries < MAX_TRIES; ++tries) {
-        uECC_word_t T[uECC_N_WORDS];
+        uint8_t T[BYTE_LENGTH_OF_N];
         uint8_t *T_ptr = (uint8_t *)T;
         unsigned T_bytes = 0;
         while (T_bytes < sizeof(T)) {
@@ -2320,11 +2392,11 @@ int uECC_sign_deterministic(const uint8_t private_key[uECC_BYTES],
                 T_ptr[T_bytes] = V[i];
             }
         }
-    #if (uECC_CURVE == uECC_secp160r1)
-        T[uECC_WORDS] &= 0x01;
-    #endif
-    
-        if (uECC_sign_with_k(private_key, message_hash, T, signature)) {
+
+        uECC_word_t k[uECC_N_WORDS];
+        vli_bytesToNative(k, T);
+
+        if (uECC_sign_with_k(private_key, message_hash, k, signature)) {
             return 1;
         }
 
