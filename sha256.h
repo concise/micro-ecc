@@ -1,10 +1,12 @@
 #ifndef __SHA256_H__
 #define __SHA256_H__
 
+#include <stdint.h>
+
 #define SHA256_BLOCK_SIZE 64
 #define SHA256_OUTPUT_SIZE 32
 
-typedef unsigned long int sha256_word_t; /* to hold 0x00000000 ~ 0xffffffff */
+typedef uint32_t sha256_word_t; /* to hold 0x00000000 ~ 0xffffffff */
 
 typedef struct {
     sha256_word_t runninghash[8];   /* intermediate hash value (H0 ~ H7)    */
