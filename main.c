@@ -15,7 +15,7 @@ int main(void)
             0x68, 0xe9, 0x89, 0x15, 0x62, 0x11, 0x3d, 0x8a, 0x62, 0xad,
             0xd1, 0xbf };
     uint8_t publickey[64];
-    uint8_t signature[64];
+    uint8_t signature[72];
 
     ret = ecdsa_secret_to_public(secretkey, publickey);
     if (ret) {
@@ -30,6 +30,15 @@ int main(void)
     if (ret) {
         int i;
         for (i = 0; i < 64; ++i) {
+            printf("%02x", signature[i]);
+        }
+        printf("\n");
+    }
+
+    ret = ecdsa_p256_rfc6979_sign_asn1(secretkey, hashedmsg, signature);
+    if (ret) {
+        int i;
+        for (i = 0; i < ret; ++i) {
             printf("%02x", signature[i]);
         }
         printf("\n");
