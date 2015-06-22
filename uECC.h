@@ -3,6 +3,10 @@
 #ifndef _MICRO_ECC_H_
 #define _MICRO_ECC_H_
 
+#define uECC_ASM 0          // Only use standard C99 without any assembly
+#define uECC_CURVE 3        // Compile to use secp256r1 (NIST P-256) curve
+#define uECC_WORD_SIZE 4    // Define the word size to be 32 bits explicitly
+
 #include <stdint.h>
 
 /* Platform selection options.
